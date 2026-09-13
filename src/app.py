@@ -23,7 +23,7 @@ from prompts import (
     REACT_AGENT_SYSTEM_PROMPT,
     MAX_ITERATIONS
 )
-from providers import get_llm_provider
+from providers import get_llm_provider, MockOfflineProvider
 
 load_dotenv()
 
@@ -61,7 +61,29 @@ def run_baseline_chatbot(user_query: str, provider):
     print(f"🤖 Chatbot phản hồi:\n{response}")
 
 
-def run_react_agent(user_query: str, provider, mcp_server: MCPAcademicServer) -> list:
+def requires_booking_follow_up(user_query: str, tool_name: str, observation: dict) -> bool:
+    """Xác định khi nào cần tiếp tục từ bước tra cứu sang bước đặt lịch."""
+    query = user_query.casefold()
+    booking_terms = (
+        "đặt lịch",
+        "chọn bác sĩ",
+        "chọn một bác sĩ",
+        "book lịch",
+        "đăng ký khám"
+    )
+    return (
+        tool_name == "academic_query"
+        and observation.get("status") in ["SUCCESS", "ALTERNATIVE_AVAILABLE"]
+        and any(term in query for term in booking_terms)
+    )
+
+
+def run_react_agent(
+    user_query: str,
+    provider,
+    mcp_server: MCPAcademicServer,
+    conversation_history: list | None = None
+) -> list:
     """
     [REACT AGENT LOOP] Thực thi vòng lặp Thought -> Action -> Observation với MCP Server
     Trả về danh sách trace log của phiên thực thi.
@@ -71,6 +93,19 @@ def run_react_agent(user_query: str, provider, mcp_server: MCPAcademicServer) ->
     step = 0
     trace_logs = []
     tools_list = mcp_server.list_tools()
+    conversation_history = conversation_history or []
+    if conversation_history:
+        history_text = "\n".join(
+            f"{item['role']}: {item['content']}"
+            for item in conversation_history[-10:]
+        )
+        agent_prompt = (
+            "Lịch sử trò chuyện gần đây:\n"
+            f"{history_text}\n\n"
+            f"Câu hỏi mới của người dùng: {user_query}"
+        )
+    else:
+        agent_prompt = user_query
     
     while step < MAX_ITERATIONS:
         step += 1
@@ -78,7 +113,7 @@ def run_react_agent(user_query: str, provider, mcp_server: MCPAcademicServer) ->
         print(f"\n--- 🔄 Vòng lặp ReAct Loop (Step {step}/{MAX_ITERATIONS}) ---")
         
         # Gọi LLM với Native Tool Calling Specs
-        llm_response = provider.generate_with_tools(user_query, tools_list, system_prompt=REACT_AGENT_SYSTEM_PROMPT)
+        llm_response = provider.generate_with_tools(agent_prompt, tools_list, system_prompt=REACT_AGENT_SYSTEM_PROMPT)
         latency_ms = round((time.time() - step_start_time) * 1000, 2)
         
         thought = llm_response.get("thought", "Đang suy luận...")
@@ -119,19 +154,45 @@ def run_react_agent(user_query: str, provider, mcp_server: MCPAcademicServer) ->
                 
                 # Tổng hợp Final Answer từ kết quả Observation thực tế
                 if obs_data.get("status") == "SUCCESS":
-                    if "data" in obs_data:
-                        d = obs_data["data"]
+                    if tool_name == "academic_query":
+                        schedules = obs_data.get("data", [])
+                        schedule_text = "; ".join(
+                            f"{item.get('doctor_name', '')}: {', '.join(item.get('available_slots', []))}"
+                            for item in schedules
+                        )
                         final_answer = (
-                            f"Kết quả tra cứu cho sinh viên {obs_data.get('student_id', '')} ({d.get('full_name', '')}): "
-                            f"Lớp {d.get('class', '')}, GPA: {d.get('gpa', '')}, Email: {d.get('email', '')}, "
-                            f"Trạng thái: {d.get('status', '')}, Cố vấn: {d.get('advisor', '')}."
+                            f"Lịch bác sĩ tại {obs_data.get('facility', '')}, "
+                            f"chuyên khoa {obs_data.get('specialty', '')} ngày {obs_data.get('date', '')}: "
+                            f"{schedule_text or 'không có khung giờ trống.'}"
+                        )
+                    elif tool_name == "schedule_appointment":
+                        final_answer = (
+                            f"Đặt lịch khám thành công. Mã đặt lịch: {obs_data.get('booking_id', '')}. "
+                            f"Bệnh nhân: {obs_data.get('patient_name', '')}; "
+                            f"Cơ sở: {obs_data.get('facility', '')}; "
+                            f"Thời gian: {obs_data.get('datetime', '')}."
                         )
                     elif "message" in obs_data:
                         final_answer = obs_data["message"]
                     else:
                         final_answer = f"Đã hoàn tất xử lý qua MCP Server: {json.dumps(obs_data, ensure_ascii=False)}"
+                elif obs_data.get("status") == "ALTERNATIVE_AVAILABLE":
+                    alternatives = obs_data.get("data", [])
+                    alternative_text = "; ".join(
+                        f"{item.get('date', '')}: {item.get('doctor_name', '')} "
+                        f"({', '.join(item.get('available_slots', []))})"
+                        for item in alternatives
+                    )
+                    final_answer = f"{obs_data.get('message', '')} Lịch thay thế: {alternative_text}"
                 elif obs_data.get("status") == "NOT_FOUND":
-                    final_answer = obs_data.get("message", "Không tìm thấy thông tin sinh viên yêu cầu.")
+                    final_answer = obs_data.get("message", "Không tìm thấy lịch bác sĩ phù hợp tại Vinmec.")
+                elif obs_data.get("status") == "INVALID_DATE":
+                    final_answer = obs_data.get(
+                        "message",
+                        "Ngày khám không hợp lệ. Vui lòng cung cấp ngày hợp lệ."
+                    )
+                elif obs_data.get("status") in ["INVALID_DATETIME", "SLOT_UNAVAILABLE"]:
+                    final_answer = obs_data.get("message", "Khung giờ khám không khả dụng.")
                 else:
                     final_answer = f"Phản hồi từ công cụ: {json.dumps(obs_data, ensure_ascii=False)}"
             
@@ -144,6 +205,17 @@ def run_react_agent(user_query: str, provider, mcp_server: MCPAcademicServer) ->
                 "observation": obs_data,
                 "latency_ms": latency_ms
             })
+
+            # Giữ vòng lặp cho yêu cầu nhiều bước: tra cứu trước, sau đó đặt lịch.
+            if requires_booking_follow_up(user_query, tool_name, obs_data):
+                agent_prompt = (
+                    f"Yêu cầu ban đầu: {user_query}\n\n"
+                    f"Kết quả tra cứu từ Tool: {json.dumps(obs_data, ensure_ascii=False)}\n\n"
+                    "Hãy tiếp tục xử lý yêu cầu. Nếu đã đủ thông tin, gọi "
+                    "schedule_appointment để đặt lịch; không gọi lại academic_query."
+                )
+                print("🧠 [Thought]: Đã có lịch bác sĩ. Tiếp tục bước đặt lịch theo yêu cầu ban đầu.")
+                continue
             
             # Kết thúc vòng lặp sau khi hoàn tất Observation và xuất Final Answer
             print(f"🧠 [Thought]: Đã nhận được dữ liệu từ MCP Server. Tổng hợp kết quả phản hồi.")
@@ -164,10 +236,13 @@ def run_react_agent(user_query: str, provider, mcp_server: MCPAcademicServer) ->
 
 if __name__ == "__main__":
     print("==========================================================")
-    print("🏫 VINUNI AI COURSE - DAY 03 LAB: CHATBOT VS REACT AGENT")
+    print("🏥 VINMEC AI COURSE - DAY 03 LAB: CHATBOT VS REACT AGENT")
     print("==========================================================")
     
     provider = get_llm_provider()
+    if "--all" in sys.argv:
+        # Test suite được phép chạy offline; chỉ interactive mới cần API thật.
+        provider = MockOfflineProvider()
     mcp_server = MCPAcademicServer()
     
     print(f"🔌 LLM Provider: {provider.__class__.__name__}")
@@ -179,17 +254,35 @@ if __name__ == "__main__":
     if "--interactive" in sys.argv:
         print("🎮 [INTERACTIVE MODE] Trò chuyện trực tiếp với ReAct Agent:")
         print("💡 Gợi ý câu hỏi thử nghiệm:")
-        print("   - Câu hỏi chung: 'Quy chế học vụ VinUni yêu cầu bao nhiêu tín chỉ?'")
-        print("   - Tra cứu học vụ: 'Hãy tra cứu thông tin học vụ của sinh viên SV2026001'")
-        print("   - Đặt lịch hẹn: 'Đặt lịch hẹn tư vấn cho SV2026001 vào 14:00 ngày 15/09/2026'")
+        print("   - Câu hỏi chung: 'Vinmec có những chuyên khoa nào?'")
+        print("   - Tra cứu lịch bác sĩ: 'Tra cứu lịch bác sĩ Tim mạch tại Vinmec Times City ngày 20/09/2026'")
+        print("   - Đặt lịch khám: 'Đặt lịch khám Da liễu tại Vinmec Central Park lúc 09:00 ngày 20/09/2026'")
         print("   - Gõ 'exit' hoặc 'quit' để kết thúc phiên trò chuyện.\n")
+        conversation_history = []
         while True:
             try:
                 user_input = input("👤 Sinh viên hỏi: ").strip()
                 if not user_input or user_input.lower() in ["exit", "quit"]:
                     print("👋 Tạm biệt! Kết thúc phiên trò chuyện.")
                     break
-                logs = run_react_agent(user_input, provider, mcp_server)
+                logs = run_react_agent(
+                    user_input,
+                    provider,
+                    mcp_server,
+                    conversation_history
+                )
+                final_answer = next(
+                    (
+                        item.get("output", "")
+                        for item in reversed(logs)
+                        if item.get("action_type") == "FINAL_ANSWER"
+                    ),
+                    ""
+                )
+                conversation_history.extend([
+                    {"role": "user", "content": user_input},
+                    {"role": "assistant", "content": final_answer}
+                ])
                 save_waterfall_trace(logs)
             except (KeyboardInterrupt, EOFError):
                 print("\n👋 Đã thoát phiên tương tác.")
@@ -227,7 +320,7 @@ if __name__ == "__main__":
         print("  2. Chạy toàn bộ Test Cases:    python src/app.py --all\n")
         
         sample_query = tests[1]["question"]
-        print(f"--- 🏁 DEMO CHẠY THỬ 1 TEST CASE MẪU (TC02: Tra cứu học vụ) ---")
+        print(f"--- 🏁 DEMO CHẠY THỬ 1 TEST CASE MẪU (TC02: Tra cứu lịch bác sĩ) ---")
         logs = run_react_agent(sample_query, provider, mcp_server)
         save_waterfall_trace(logs)
         print("\n💡 Hãy thử ngay lệnh: python src/app.py --interactive để chat trực tiếp!")

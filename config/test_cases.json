@@ -1,0 +1,37 @@
+[
+  {
+    "id": "TC01",
+    "type": "direct_query",
+    "question": "Xin chào, Vinmec có những chuyên khoa và dịch vụ khám bệnh nào?",
+    "expected_behavior": "Chatbot trả lời trực tiếp từ System Prompt về các chuyên khoa, quy trình khám và lưu ý đặt lịch, không cần gọi Tool.",
+    "complexity": "Low"
+  },
+  {
+    "id": "TC02",
+    "type": "single_tool_query",
+    "question": "Hãy tra cứu lịch làm việc trong tuần này của bác sĩ chuyên khoa Tim mạch tại Vinmec Times City.",
+    "expected_behavior": "Agent nhận diện nhu cầu tra cứu lịch bác sĩ, tự động gọi Tool tra cứu lịch làm việc với cơ sở, chuyên khoa và khoảng thời gian được trích xuất chính xác.",
+    "complexity": "Medium"
+  },
+  {
+    "id": "TC03",
+    "type": "appointment_booking",
+    "question": "Đặt lịch khám chuyên khoa Da liễu tại Vinmec Central Park cho chị Nguyễn Minh Anh vào 09:00 ngày 20/09/2026.",
+    "expected_behavior": "Agent xác nhận đủ thông tin bệnh nhân, cơ sở, chuyên khoa và thời gian, sau đó tự động gọi Tool 'schedule_appointment' với các tham số chính xác.",
+    "complexity": "Medium"
+  },
+  {
+    "id": "TC04",
+    "type": "multi_step_reasoning",
+    "question": "Tôi muốn khám bác sĩ Nội tiết tại Vinmec Times City vào chiều 22/09/2026. Hãy tìm bác sĩ còn lịch phù hợp rồi đặt lịch khám cho bệnh nhân Trần Hoàng Nam, số điện thoại 0901234567.",
+    "expected_behavior": "Agent thực hiện chuỗi ReAct nhiều bước: tra cứu bác sĩ và khung giờ còn trống, chọn lịch phù hợp theo yêu cầu, xin xác nhận nếu cần, rồi gọi 'schedule_appointment' để đặt lịch.",
+    "complexity": "High"
+  },
+  {
+    "id": "TC05",
+    "type": "edge_case_handling",
+    "question": "Hãy kiểm tra lịch làm việc của bác sĩ chuyên khoa Nhi tên Lê Hoàng Phúc tại Vinmec Đà Nẵng vào ngày 31/02/2026.",
+    "expected_behavior": "Agent phát hiện ngày không hợp lệ hoặc không có dữ liệu, trả lời lịch sự và yêu cầu người dùng cung cấp ngày hợp lệ; không bịa lịch khám hay thông tin bác sĩ.",
+    "complexity": "Medium"
+  }
+]
