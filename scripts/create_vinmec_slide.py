@@ -145,7 +145,7 @@ def build_png():
     y = 672
     for name, why, score, color in fit:
         draw.ellipse((lx + 25, y + 2, lx + 61, y + 38), fill=color)
-        draw_text(draw, (lx + 25, y + 8), score, font(16, True), BG, anchor="ma")
+        draw_text(draw, (lx + 43, y + 20), score, font(16, True), BG, anchor="mm")
         draw_text(draw, (lx + 77, y), name, font(14, True), WHITE)
         draw_text(draw, (lx + 77, y + 23), why, font(12), MUTED, lw - 120)
         y += 67
@@ -179,7 +179,6 @@ def build_png():
     arrow(draw, (cx + 550, 410), (cx + 345, 496), ORANGE, 3)
     arrow(draw, (cx + 550, 410), (cx + 620, 496), ORANGE, 3)
     arrow(draw, (cx + 810, 542), (cx + 840, 542), TEAL, 3)
-    draw_text(draw, (cx + 842, 525), "result", font(12, True), MUTED)
 
     # Loop-back observation.
     draw.arc((cx + 90, 625, cx + 760, 800), 195, 345, fill=CORAL, width=4)
@@ -219,10 +218,10 @@ def build_png():
     metrics = [("5/5", "test cases", BLUE), ("2", "native tools", TEAL), ("1", "waterfall trace", ORANGE)]
     x = rx + 25
     for value, label, color in metrics:
-        draw.ellipse((x, 778, x + 69, 847), fill=color)
-        draw_text(draw, (x + 34, 789), value, font(17, True), BG, anchor="ma")
-        draw_text(draw, (x + 82, 788), label, font(13, True), WHITE)
-        x += 135
+        draw.ellipse((x, 778, x + 62, 840), fill=color)
+        draw_text(draw, (x + 31, 809), value, font(16, True), BG, anchor="mm")
+        draw_text(draw, (x, 852), label, font(12, True), WHITE, 105, spacing=2)
+        x += 130
     draw.line((rx + 25, 872, rx + rw - 25, 872), fill=(41, 84, 94), width=1)
     draw_text(draw, (rx + 25, 892), "Chat UI + Interactive CLI", font(14, True), MINT)
     draw_text(draw, (rx + 25, 920), "Kết quả trả lời dựa trên Observation,\nkhông bịa lịch khám.", font(13), MUTED, rw - 50, spacing=4)
@@ -315,7 +314,7 @@ def build_pptx():
 <a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="Vinmec Theme"><a:themeElements><a:clrScheme name="Vinmec"><a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1><a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1><a:dk2><a:srgbClr val="172033"/></a:dk2><a:lt2><a:srgbClr val="F5F7FA"/></a:lt2><a:accent1><a:srgbClr val="25D3AE"/></a:accent1><a:accent2><a:srgbClr val="68B2FF"/></a:accent2><a:accent3><a:srgbClr val="FFC56F"/></a:accent3><a:accent4><a:srgbClr val="FF7D74"/></a:accent4><a:accent5><a:srgbClr val="97F1DA"/></a:accent5><a:accent6><a:srgbClr val="A3B8C6"/></a:accent6><a:hlink><a:srgbClr val="0563C1"/></a:hlink><a:folHlink><a:srgbClr val="954F72"/></a:folHlink></a:clrScheme><a:fontScheme name="Vinmec Fonts"><a:majorFont><a:latin typeface="Segoe UI"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont><a:minorFont><a:latin typeface="Segoe UI"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont></a:fontScheme><a:fmtScheme name="Vinmec Format"><a:fillStyleLst/><a:lnStyleLst/><a:effectStyleLst/><a:bgFillStyleLst/></a:fmtScheme></a:themeElements></a:theme>'''
     pres_props = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:presentationPr xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>'''
     view_props = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:viewPr xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" lastView="sldView"><p:normalViewPr/></p:viewPr>'''
-    table_styles = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?><a:tblStyleLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"/></a:tblStyleLst>'''
+    table_styles = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?><a:tblStyleLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"/>'''
 
     with ZipFile(PPTX_PATH, "w", ZIP_DEFLATED) as z:
         parts = {
