@@ -78,6 +78,14 @@ def requires_booking_follow_up(user_query: str, tool_name: str, observation: dic
     )
 
 
+def general_vinmec_answer() -> str:
+    return (
+        "Vinmec có thể hỗ trợ khám nhiều chuyên khoa như Tim mạch, "
+        "Nhi khoa, Da liễu, Răng hàm mặt và Nội tiết. "
+        "Bạn hãy cho biết chuyên khoa, cơ sở và ngày muốn tra cứu để tôi tìm lịch bác sĩ phù hợp."
+    )
+
+
 def run_react_agent(
     user_query: str,
     provider,

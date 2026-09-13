@@ -37,44 +37,144 @@ class MockOfflineProvider(BaseLLMProvider):
 
     def generate_with_tools(self, prompt: str, tools_schema: List[Dict[str, Any]], system_prompt: str = "") -> Dict[str, Any]:
         prompt_lower = prompt.lower()
-        intent_text = prompt_lower.split("câu hỏi mới của người dùng:", 1)[-1]
+        history_marker = "câu hỏi mới của người dùng:"
+        has_conversation_history = history_marker in prompt_lower
+        history_text, intent_text = (
+            prompt_lower.split(history_marker, 1)
+            if has_conversation_history
+            else ("", prompt_lower)
+        )
+        explicit_booking = any(term in intent_text for term in (
+            "đặt lịch", "book lịch", "đăng ký khám", "đặt hẹn"
+        ))
         date_match = re.search(r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b", prompt_lower)
         requested_date = (
             f"{int(date_match.group(1)):02d}/{int(date_match.group(2)):02d}/{date_match.group(3)}"
             if date_match else "20/09/2026"
+        )
+        current_date_match = re.search(
+            r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b",
+            intent_text
+        )
+        if current_date_match:
+            requested_date = (
+                f"{int(current_date_match.group(1)):02d}/"
+                f"{int(current_date_match.group(2)):02d}/"
+                f"{current_date_match.group(3)}"
+            )
+        has_explicit_date = bool(current_date_match)
+
+        def contains_word(word: str) -> bool:
+            return re.search(rf"\b{re.escape(word)}\b", intent_text) is not None
+
+        time_match = re.search(r"\b([01]?\d|2[0-3]):[0-5]\d\b", intent_text)
+        if time_match:
+            requested_time = time_match.group(0)
+        else:
+            hour_match = re.search(r"\b(\d{1,2})\s*giờ\s*(sáng|chiều|tối)?", intent_text)
+            if hour_match:
+                hour = int(hour_match.group(1))
+                period = hour_match.group(2)
+                if period in ("chiều", "tối") and hour < 12:
+                    hour += 12
+                requested_time = f"{hour:02d}:00"
+            else:
+                requested_time = ""
+        phone_match = re.search(r"\b0\d{8,10}\b", intent_text)
+        name_match = re.search(r"\btên(?: tôi)?\s*(?:là)?\s*([^,;.\n]+)", intent_text)
+        patient_name = name_match.group(1).strip() if name_match else ""
+        if not patient_name:
+            patient_name = next(
+                (name for name in ("Nguyễn Minh Anh", "Trần Hoàng Nam") if name.casefold() in prompt_lower),
+                ""
+            )
+        has_patient_details = bool(phone_match or patient_name)
+
+        # Một lượt trả lời tiếp theo thường chỉ chứa tên, số điện thoại và giờ.
+        # Không bắt buộc người dùng phải lặp lại cụm "đặt lịch" ở lượt này:
+        # nếu lịch sử đã có kết quả lịch/chọn bác sĩ thì tiếp tục đúng luồng booking.
+        history_booking_context = any(term in history_text for term in (
+            "đặt lịch", "book lịch", "đăng ký khám", "đặt hẹn",
+            "lịch bác sĩ", "lịch làm việc", "chọn bác sĩ", "chọn một bác sĩ"
+        ))
+        pending_booking = explicit_booking or (
+            has_conversation_history
+            and history_booking_context
+            and (has_patient_details or bool(requested_time))
+        )
+        field_text = prompt_lower if pending_booking else intent_text
+        specialty = (
+            "Tim mạch" if "tim mạch" in field_text
+            else (
+                "Răng hàm mặt" if "răng" in field_text
+                else (
+                    "Da liễu" if "da liễu" in field_text
+                    else (
+                        "Nội tiết" if "nội tiết" in field_text
+                        else ("Nhi" if re.search(r"\bnhi(?: khoa)?\b", field_text) else "")
+                    )
+                )
+            )
+        )
+        facility = (
+            "Vinmec Đà Nẵng" if "đà nẵng" in field_text
+            else (
+                "Vinmec Central Park" if "central park" in field_text
+                else ("Vinmec Times City" if "times city" in field_text else "")
+            )
         )
         is_search_request = any(term in intent_text for term in (
             "tra cứu", "lịch làm việc", "tìm bác sĩ", "chọn bác sĩ", "chọn một bác sĩ", "kiểm tra"
         ))
         if (
             not is_search_request
+            and not pending_booking
             and not any(term in intent_text for term in ("đặt lịch", "book lịch", "đăng ký khám"))
-            and date_match
+            and (current_date_match or "ngày mai" not in intent_text)
             and any(term in intent_text for term in ("muốn khám", "khám", "lịch"))
         ):
             is_search_request = True
-        has_patient_details = (
-            bool(re.search(r"\b0\d{8,10}\b", prompt_lower))
-            or any(name in prompt_lower for name in ("nguyễn minh anh", "trần hoàng nam"))
-        )
         is_appointment_request = any(term in intent_text for term in (
             "đặt lịch", "book lịch", "đăng ký khám"
-        ))
+        )) or (pending_booking and has_patient_details and bool(requested_time))
+
+        if any(term in intent_text for term in (
+            "có thể khám gì", "khám gì", "chuyên khoa nào", "những chuyên khoa"
+        )) and not is_appointment_request:
+            return {
+                "type": "text",
+                "content": (
+                    "Vinmec có thể hỗ trợ khám Tim mạch, Nhi khoa, Da liễu, "
+                    "Răng hàm mặt, Nội tiết, Sản phụ khoa, Cơ xương khớp, "
+                    "Nhãn khoa, Tai mũi họng, Tiêu hóa và Hô hấp."
+                ),
+                "thought": "Người dùng hỏi thông tin tổng quan, không cần gọi Tool."
+            }
+
+        if (
+            any(term in intent_text for term in ("lịch", "bác sĩ", "khám"))
+            and not specialty
+            and not is_appointment_request
+        ):
+            return {
+                "type": "text",
+                "content": "Bạn vui lòng cho biết chuyên khoa, cơ sở Vinmec và ngày muốn tra cứu.",
+                "thought": "Thiếu chuyên khoa, cơ sở hoặc ngày nên cần hỏi lại người dùng."
+            }
 
         if is_search_request and "kết quả tra cứu từ tool" not in prompt_lower:
-            specialty = (
-                "Nhi" if "nhi" in prompt_lower
-                else (
-                    "Tim mạch" if "tim mạch" in prompt_lower
-                    else ("Răng hàm mặt" if "răng" in prompt_lower else "Nội tiết")
-                )
-            )
+            if not specialty or not facility or not has_explicit_date:
+                return {
+                    "type": "text",
+                    "content": "Bạn vui lòng cho biết chuyên khoa, cơ sở Vinmec và ngày muốn tra cứu.",
+                    "thought": "Thiếu tham số tra cứu lịch bác sĩ nên cần hỏi lại người dùng."
+                }
             return {
                 "type": "tool_call",
                 "tool_name": "academic_query",
                 "arguments": {
                     "specialty": specialty,
-                    "facility": "Vinmec Đà Nẵng" if "đà nẵng" in prompt_lower else "Vinmec Times City",
+                    "facility": facility,
                     "date": requested_date
                 },
                 "thought": "Người dùng muốn tra cứu lịch bác sĩ Vinmec. Tôi sẽ gọi tool academic_query."
@@ -85,6 +185,13 @@ class MockOfflineProvider(BaseLLMProvider):
                 "type": "text",
                 "content": "Để đặt lịch khám, vui lòng cung cấp họ tên và số điện thoại của bệnh nhân.",
                 "thought": "Chưa đủ thông tin bệnh nhân để gọi schedule_appointment."
+            }
+
+        if is_appointment_request and (not specialty or not facility or not requested_time):
+            return {
+                "type": "text",
+                "content": "Để đặt lịch, vui lòng cung cấp chuyên khoa, cơ sở Vinmec và giờ khám cụ thể.",
+                "thought": "Chưa đủ thông tin lịch khám để gọi schedule_appointment."
             }
 
         # Mô phỏng nhận diện intent gọi Tool cho chủ đề Vinmec.
@@ -106,17 +213,11 @@ class MockOfflineProvider(BaseLLMProvider):
                 "type": "tool_call",
                 "tool_name": "schedule_appointment",
                 "arguments": {
-                    "patient_name": "Trần Hoàng Nam" if "nội tiết" in prompt_lower else "Nguyễn Minh Anh",
-                    "phone_number": "0901234567",
-                    "specialty": (
-                        "Nội tiết" if "nội tiết" in prompt_lower
-                        else ("Răng hàm mặt" if "răng" in prompt_lower else "Da liễu")
-                    ),
-                    "facility": "Vinmec Times City" if "times city" in prompt_lower else "Vinmec Central Park",
-                    "datetime_str": (
-                        "15:00 22/09/2026" if "nội tiết" in prompt_lower
-                        else (f"09:00 {requested_date}" if "răng" in prompt_lower else f"09:00 {requested_date}")
-                    ),
+                    "patient_name": patient_name or ("Trần Hoàng Nam" if "nội tiết" in field_text else "Nguyễn Minh Anh"),
+                    "phone_number": phone_match.group(0) if phone_match else "0901234567",
+                    "specialty": specialty,
+                    "facility": facility,
+                    "datetime_str": f"{requested_time} {requested_date}",
                     "doctor_name": (
                         "BS.CKII Trần Hoàng Nam" if "nội tiết" in prompt_lower
                         else ("BS.CKII Phạm Minh Đức" if "răng" in prompt_lower else "TS.BS Lê Thu Hà")
@@ -125,21 +226,13 @@ class MockOfflineProvider(BaseLLMProvider):
                 "thought": "Người dùng yêu cầu đặt lịch khám tại Vinmec. Tôi sẽ gọi tool schedule_appointment."
             }
         elif "tra cứu" in prompt_lower or "lịch làm việc" in prompt_lower or "kiểm tra" in prompt_lower:
-            date = requested_date
-            specialty = (
-                "Nhi" if "nhi" in prompt_lower
-                else (
-                    "Tim mạch" if "tim mạch" in prompt_lower
-                    else ("Răng hàm mặt" if "răng" in prompt_lower else "Nội tiết")
-                )
-            )
             return {
                 "type": "tool_call",
                 "tool_name": "academic_query",
                 "arguments": {
                     "specialty": specialty,
                     "facility": "Vinmec Đà Nẵng" if "đà nẵng" in prompt_lower else "Vinmec Times City",
-                    "date": date
+                    "date": requested_date
                 },
                 "thought": "Người dùng muốn tra cứu lịch bác sĩ Vinmec. Tôi sẽ gọi tool academic_query."
             }

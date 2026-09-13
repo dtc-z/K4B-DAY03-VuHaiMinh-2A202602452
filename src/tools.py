@@ -100,6 +100,13 @@ MOCK_DATABASE = [
         "available_slots": ["09:00", "10:30", "15:00"]
     },
     {
+        "doctor_name": "TS.BS Lê Thu Hà",
+        "specialty": "Da liễu",
+        "facility": "Vinmec Times City",
+        "date": "20/09/2026",
+        "available_slots": ["14:00", "16:00"]
+    },
+    {
         "doctor_name": "BS.CKII Trần Hoàng Nam",
         "specialty": "Nội tiết",
         "facility": "Vinmec Times City",
